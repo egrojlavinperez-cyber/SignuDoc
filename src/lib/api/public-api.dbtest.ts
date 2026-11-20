@@ -19,6 +19,7 @@ import type {
 } from "../services/email.ts";
 import { issueSigningLink } from "../services/signing-links.ts";
 import {
+  declineSigningForToken,
   getSigningPayloadForToken,
   recordSignerConsent,
   submitSigningForToken,
@@ -649,6 +650,89 @@ test("webhooks are signed, retried after a failure, then delivered", async () =>
         (delivery) =>
           (JSON.parse(delivery.body) as { type: string }).type ===
           "envelope.completed",
+      ),
+    );
+  } finally {
+    await new Promise<void>((resolve) =>
+      receiver.server.close(() => resolve()),
+    );
+  }
+});
+
+test("declining and voiding are webhooks too, and other envelopes are not", async () => {
+  await database.query(`update api_envelopes set webhook_cursor = 1000000`);
+
+  const receiver = await startReceiver([]);
+
+  try {
+    await saveWebhookEndpoint({ url: receiver.url, userId: adminId }, database);
+
+    const declined = (await create(await requestBody())).envelope;
+    const voided = (await create(await requestBody())).envelope;
+    const signer = declined.signers.find((row) => row.key === "client")!;
+    const signerRow = await database.query<{ id: string }>(
+      `select id from signers where envelope_id = $1 and email = $2`,
+      [declined.id, signer.email],
+    );
+    const link = await issueSigningLink({ expiresInSeconds: 3600 });
+
+    await database.query(
+      `update signers set signing_token_hash = $1, signing_token_expires_at = $2 where id = $3`,
+      [link.tokenHash, link.exp, signerRow.rows[0]!.id],
+    );
+    await recordSignerConsent(
+      link.token,
+      { disclosureVersion: ELECTRONIC_RECORDS_DISCLOSURE_VERSION },
+      { database },
+    );
+    await declineSigningForToken(
+      link.token,
+      { reason: "Wrong fee." },
+      { database },
+    );
+    await voidApiEnvelope(principal, voided.id, {}, {}, database);
+
+    // An envelope made in the app, not through the API, sends nothing.
+    await database.query(
+      `
+        insert into envelopes (
+          id, user_id, title, status, source_pdf_key, source_pdf_filename,
+          source_pdf_size_bytes, page_count, source_pdf_hash
+        ) values ($1, $2, 'Made in the app', 'draft', 'x.pdf', 'x.pdf', 1, 1, $3)
+      `,
+      [randomUUID(), adminId, "b".repeat(64)],
+    );
+
+    await enqueueWebhookEvents(database);
+    await deliverDueWebhooks({ database });
+
+    const types = receiver.received.map(
+      (delivery) =>
+        JSON.parse(delivery.body) as {
+          envelope: ApiEnvelopeView;
+          type: string;
+        },
+    );
+
+    assert.ok(
+      types.some(
+        (event) =>
+          event.type === "envelope.declined" &&
+          event.envelope.id === declined.id &&
+          event.envelope.status === "declined",
+      ),
+    );
+    assert.ok(
+      types.some(
+        (event) =>
+          event.type === "envelope.voided" &&
+          event.envelope.id === voided.id &&
+          event.envelope.status === "voided",
+      ),
+    );
+    assert.ok(
+      types.every((event) =>
+        [declined.id, voided.id].includes(event.envelope.id),
       ),
     );
   } finally {
