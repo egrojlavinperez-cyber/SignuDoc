@@ -4,11 +4,13 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 
 import { FieldShell, ShellButton } from "@/components/shared/form-shell";
+import { ApiKeysPanel } from "@/components/settings/api-keys-panel";
 import { BrandingPanel } from "@/components/settings/branding-panel";
 import { Part11Panel } from "@/components/settings/part11-panel";
 import { PeoplePanel } from "@/components/settings/people-panel";
 import { SecurityPanel } from "@/components/settings/security-panel";
 import { SignerDataPanel } from "@/components/settings/signer-data-panel";
+import { WebhooksPanel } from "@/components/settings/webhooks-panel";
 import type { EmailDnsRecord, EmailStatus } from "@/lib/email-status";
 import type {
   OrganizationSettingsField,
@@ -414,6 +416,11 @@ export function OrganizationSettings({
         ) : null}
 
         <SignerDataPanel />
+
+        {/* For another system of the organization's own, such as an
+            internal operating system, to send PDFs for signature. */}
+        {!values.hosted ? <ApiKeysPanel /> : null}
+        {!values.hosted ? <WebhooksPanel /> : null}
       </div>
     </section>
   );

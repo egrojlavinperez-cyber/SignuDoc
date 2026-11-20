@@ -67,6 +67,13 @@ export function describeSignerCorrectedEvent(
   return `Signer corrected from ${formatSignerPerson(previousName, previousEmail)} to ${formatSignerPerson(name, email)}`;
 }
 
+declare global {
+  // Told about each envelope audit event once it has committed. Kept on
+  // globalThis so it reaches every server bundle; unset outside the server.
+  var __signudocOnEnvelopeAuditEvent:
+    ((event: { envelopeId: string; event: string }) => void) | undefined;
+}
+
 export type RecordAuditEventInput = {
   /** Given when the event was already shown on a certificate under this id. */
   id?: string;
@@ -260,6 +267,11 @@ async function insertChainedAuditEvent(
 
   afterCommit(database, () => {
     logAuditRecord({ ...fields, rowHash, trail: "envelope" });
+    // Set by src/instrumentation.ts in the server, to send API webhooks.
+    globalThis.__signudocOnEnvelopeAuditEvent?.({
+      envelopeId: input.envelopeId,
+      event: input.event,
+    });
   });
 
   return auditEventRecordSchema.parse({

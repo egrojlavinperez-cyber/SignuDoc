@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { requestDailyWebhookSweep } from "@/lib/api/webhook-trigger";
 import {
   identifyRetentionCaller,
   isCronLockedOutByOlderSecret,
@@ -30,6 +31,9 @@ async function handle(request: Request) {
 
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
+
+  // API webhooks still due, once the response has gone.
+  requestDailyWebhookSweep();
 
   try {
     const outcome = await runRetentionJob({ caller });
